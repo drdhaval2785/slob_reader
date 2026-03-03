@@ -4,6 +4,6 @@
 - Support for reading Slob (.slob) files.
 - Support for zlib, bz2, and lzma2 compression.
 
-# 0.1.1
+# 0.1.2
 
-- Updated archive package to newest version.
+- Optimized index loading with bulk reads, significantly reducing initial delay.

@@ -84,19 +84,17 @@ class SlobReader {
   Future<void> _loadRefs() async {
     await _file.setPosition(_header.refsOffset);
     final count = await _readInt();
-    _refOffsets = [];
-    for (var i = 0; i < count; i++) {
-      _refOffsets.add(await _readLong());
-    }
+    final bytes = await _file.read(count * 8);
+    final view = ByteData.view(bytes.buffer);
+    _refOffsets = List<int>.generate(count, (i) => view.getUint64(i * 8));
   }
 
   Future<void> _loadStore() async {
     await _file.setPosition(_header.storeOffset);
     final count = await _readInt();
-    _storeOffsets = [];
-    for (var i = 0; i < count; i++) {
-      _storeOffsets.add(await _readLong());
-    }
+    final bytes = await _file.read(count * 8);
+    final view = ByteData.view(bytes.buffer);
+    _storeOffsets = List<int>.generate(count, (i) => view.getUint64(i * 8));
   }
 
   Future<SlobRef> getRef(int index) async {
