@@ -1,0 +1,23 @@
+# https://dart.dev/guides/libraries/private-files
+
+# Files and directories created by pub
+.dart_tool/
+.packages
+.pub/
+build/
+# If you're building a package, then you should check in pubspec.lock
+# However, for an application, you should keep it.
+# slob_reader is a package, so we uncomment this if we want to follow standard package rules.
+# pubspec.lock
+
+# IDE-specific files
+.idea/
+.vscode/
+*.iml
+*.iws
+
+# MacOS files
+.DS_Store
+
+# Test-specific data files
+abc.slob
