@@ -1,7 +1,7 @@
 name: slob_reader
 description: A pure Dart implementation of the Slob (Sorted List of Blobs) file format reader.
-version: 0.1.2
-repository: https://github.com/itkach/slob
+version: 0.1.3
+repository: https://github.com/drdhaval2785/slob_reader
 environment:
   sdk: '>=3.0.0 <4.0.0'
 

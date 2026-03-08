@@ -34,5 +34,32 @@ void main() {
 
       await reader.close();
     });
+    test('can read multiple blobs (getBlobs)', () async {
+      final path = 'abc.slob';
+      if (!File(path).existsSync()) {
+        markTestSkipped('abc.slob not found');
+        return;
+      }
+
+      final reader = await SlobReader.open(path);
+      
+      // Read indices 0, 1, 5, 10
+      final indices = [0, 1, 5, 10];
+      final individualBlobs = <SlobBlob>[];
+      for (final i in indices) {
+        individualBlobs.add(await reader.getBlob(i));
+      }
+
+      final bulkBlobs = await reader.getBlobs([(0, 2), (5, 1), (10, 1)]);
+
+      expect(bulkBlobs.length, equals(individualBlobs.length));
+      for (var i = 0; i < bulkBlobs.length; i++) {
+        expect(bulkBlobs[i].key, equals(individualBlobs[i].key));
+        expect(bulkBlobs[i].content, equals(individualBlobs[i].content));
+        expect(bulkBlobs[i].contentType, equals(individualBlobs[i].contentType));
+      }
+
+      await reader.close();
+    });
   });
 }

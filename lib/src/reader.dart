@@ -98,13 +98,8 @@ class SlobReader {
   }
 
   Future<SlobRef> getRef(int index) async {
-    final pos = _header.refsOffset +
-        4 +
-        (index * 8); // Skip count (4) + refs (index * 8)
-    await _file.setPosition(pos);
-    final itemDataPos = (await _file.position()) +
-        (8 * (_refOffsets.length - index)) +
-        _refOffsets[index];
+    final itemDataPos =
+        _header.refsOffset + 4 + (8 * _refOffsets.length) + _refOffsets[index];
 
     await _file.setPosition(itemDataPos);
     final key = await _readText();
@@ -121,10 +116,9 @@ class SlobReader {
   }
 
   Future<Uint8List> getBlobContent(int binIndex, int itemIndex) async {
-    final pos = _header.storeOffset + 4 + (binIndex * 8);
-    await _file.setPosition(pos);
-    final itemDataPos = (await _file.position()) +
-        (8 * (_storeOffsets.length - binIndex)) +
+    final itemDataPos = _header.storeOffset +
+        4 +
+        (8 * _storeOffsets.length) +
         _storeOffsets[binIndex];
 
     await _file.setPosition(itemDataPos);
@@ -133,29 +127,25 @@ class SlobReader {
     final compressedSize = await _readInt();
     final compressedContent = await _file.read(compressedSize);
 
-    Uint8List decompressed;
-    if (_header.compression == 'zlib') {
-      decompressed =
-          Uint8List.fromList(ZLibDecoder().decodeBytes(compressedContent));
-    } else if (_header.compression == 'bz2') {
-      decompressed =
-          Uint8List.fromList(BZip2Decoder().decodeBytes(compressedContent));
-    } else if (_header.compression == 'lzma2') {
-      // Archive's XZDecoder might be needed for LZMA2 if raw is not directly exposed
-      // But xz is usually a container for lzma2. Slob uses "raw lzma2 compression with LZMA2 filter".
-      // Let's try XZDecoder or search if archive has raw lzma2.
-      // Based on research, archive handles LZMA2 via XZ.
-      decompressed =
-          Uint8List.fromList(XZDecoder().decodeBytes(compressedContent));
-    } else if (_header.compression == '') {
-      decompressed = compressedContent;
-    } else {
-      throw Exception('Unsupported compression: ${_header.compression}');
-    }
+    final decompressed = _decompress(compressedContent);
 
     // Extract item from bin
     final binReader = _BinReader(decompressed, binItemCount);
     return binReader.getItem(itemIndex);
+  }
+
+  Uint8List _decompress(Uint8List compressedContent) {
+    if (_header.compression == 'zlib') {
+      return Uint8List.fromList(ZLibDecoder().decodeBytes(compressedContent));
+    } else if (_header.compression == 'bz2') {
+      return Uint8List.fromList(BZip2Decoder().decodeBytes(compressedContent));
+    } else if (_header.compression == 'lzma2') {
+      return Uint8List.fromList(XZDecoder().decodeBytes(compressedContent));
+    } else if (_header.compression == '') {
+      return compressedContent;
+    } else {
+      throw Exception('Unsupported compression: ${_header.compression}');
+    }
   }
 
   Future<SlobBlob> getBlob(int index) async {
@@ -173,11 +163,71 @@ class SlobReader {
     );
   }
 
+  Future<List<SlobBlob>> getBlobs(List<(int, int)> ranges) async {
+    final List<int> allIndices = [];
+    for (final (start, length) in ranges) {
+      for (var i = 0; i < length; i++) {
+        allIndices.add(start + i);
+      }
+    }
+
+    if (allIndices.isEmpty) return [];
+
+    // Map global index to its Ref
+    // We can optimize this by sorting indices and reading sequentially if there are many
+    final Map<int, SlobRef> refs = {};
+    for (final index in allIndices) {
+      refs[index] = await getRef(index);
+    }
+
+    // Group indices by binIndex
+    final Map<int, List<int>> binGroups = {};
+    for (final index in allIndices) {
+      final ref = refs[index]!;
+      binGroups.putIfAbsent(ref.binIndex, () => []).add(index);
+    }
+
+    final Map<int, SlobBlob> blobsMap = {};
+
+    for (final binIndex in binGroups.keys) {
+      final indicesInBin = binGroups[binIndex]!;
+
+      final itemDataPos = _header.storeOffset +
+          4 +
+          (8 * _storeOffsets.length) +
+          _storeOffsets[binIndex];
+
+      await _file.setPosition(itemDataPos);
+      final binItemCount = await _readInt();
+      final contentTypeIds = await _file.read(binItemCount);
+      final compressedSize = await _readInt();
+      final compressedContent = await _file.read(compressedSize);
+
+      final decompressed = _decompress(compressedContent);
+      final binReader = _BinReader(decompressed, binItemCount);
+
+      for (final index in indicesInBin) {
+        final ref = refs[index]!;
+        final content = binReader.getItem(ref.itemIndex);
+        final contentType = _header.contentTypes[contentTypeIds[ref.itemIndex]];
+
+        blobsMap[index] = SlobBlob(
+          id: (ref.binIndex << 16) | ref.itemIndex,
+          key: ref.key,
+          fragment: ref.fragment,
+          contentType: contentType,
+          content: content,
+        );
+      }
+    }
+
+    return allIndices.map((i) => blobsMap[i]!).toList();
+  }
+
   Future<int> _getContentTypeId(int binIndex, int itemIndex) async {
-    final pos = _header.storeOffset + 4 + (binIndex * 8);
-    await _file.setPosition(pos);
-    final itemDataPos = (await _file.position()) +
-        (8 * (_storeOffsets.length - binIndex)) +
+    final itemDataPos = _header.storeOffset +
+        4 +
+        (8 * _storeOffsets.length) +
         _storeOffsets[binIndex];
     await _file.setPosition(itemDataPos + 4); // skip itemCount
     final contentTypeIds = await _file.read(itemIndex + 1);
