@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Added documentation and examples.
+
 ## 0.1.3
 
 - Added `getBlobs` method for bulk reading dictionary entries with optimized bin-level grouping.
