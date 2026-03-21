@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:archive/archive_io.dart';
 import 'models.dart';
-import 'source.dart';
+import 'package:dictzip_reader/dictzip_reader.dart' show RandomAccessSource, FileRandomAccessSource;
 
 class SlobReader {
   final RandomAccessSource _source;

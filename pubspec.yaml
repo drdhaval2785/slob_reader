@@ -7,6 +7,8 @@ environment:
 
 dependencies:
   archive: ^4.0.9
+  dictzip_reader:
+    path: ../dictzip_reader
 
 dev_dependencies:
   lints: ^3.0.0
