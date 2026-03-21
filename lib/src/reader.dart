@@ -159,7 +159,7 @@ class SlobReader {
         .contentTypes[await _getContentTypeId(ref.binIndex, ref.itemIndex)];
 
     return SlobBlob(
-      id: (ref.binIndex << 16) | ref.itemIndex,
+      id: index,
       key: ref.key,
       fragment: ref.fragment,
       contentType: contentType,
@@ -216,7 +216,7 @@ class SlobReader {
         final contentType = _header.contentTypes[contentTypeIds[ref.itemIndex]];
 
         blobsMap[index] = SlobBlob(
-          id: (ref.binIndex << 16) | ref.itemIndex,
+          id: index,
           key: ref.key,
           fragment: ref.fragment,
           contentType: contentType,
