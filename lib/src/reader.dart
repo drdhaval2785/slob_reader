@@ -1,11 +1,12 @@
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:archive/archive_io.dart';
 import 'models.dart';
+import 'source.dart';
 
 class SlobReader {
-  final RandomAccessFile _file;
+  final RandomAccessSource _source;
+  int _position = 0;
   late final SlobHeader _header;
   late final List<int> _refOffsets;
   late final List<int> _storeOffsets;
@@ -21,24 +22,27 @@ class SlobReader {
     0x1f
   ];
 
-  SlobReader._(this._file);
+  SlobReader._(this._source);
 
   static Future<SlobReader> open(String path) async {
-    final file = await File(path).open(mode: FileMode.read);
-    final reader = SlobReader._(file);
+    return openSource(FileRandomAccessSource(path));
+  }
+
+  static Future<SlobReader> openSource(RandomAccessSource source) async {
+    final reader = SlobReader._(source);
     await reader._init();
     return reader;
   }
 
   Future<void> _init() async {
-    await _file.setPosition(0);
-    final magic = await _file.read(8);
+    _position = 0;
+    final magic = await _read(8);
     if (!_listEquals(magic, magicBytes)) {
       throw Exception('Invalid Slob magic: $magic');
     }
 
     // UUID
-    final uuidBytes = await _file.read(16);
+    final uuidBytes = await _read(16);
     final uuid =
         uuidBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
@@ -62,7 +66,7 @@ class SlobReader {
     final blobCount = await _readInt();
     final storeOffset = await _readLong();
     final size = await _readLong();
-    final refsOffset = await _file.position();
+    final refsOffset = _position;
 
     _header = SlobHeader(
       magic: Uint8List.fromList(magic),
@@ -82,17 +86,17 @@ class SlobReader {
   }
 
   Future<void> _loadRefs() async {
-    await _file.setPosition(_header.refsOffset);
+    _position = _header.refsOffset;
     final count = await _readInt();
-    final bytes = await _file.read(count * 8);
+    final bytes = await _read(count * 8);
     final view = ByteData.view(bytes.buffer);
     _refOffsets = List<int>.generate(count, (i) => view.getUint64(i * 8));
   }
 
   Future<void> _loadStore() async {
-    await _file.setPosition(_header.storeOffset);
+    _position = _header.storeOffset;
     final count = await _readInt();
-    final bytes = await _file.read(count * 8);
+    final bytes = await _read(count * 8);
     final view = ByteData.view(bytes.buffer);
     _storeOffsets = List<int>.generate(count, (i) => view.getUint64(i * 8));
   }
@@ -101,7 +105,7 @@ class SlobReader {
     final itemDataPos =
         _header.refsOffset + 4 + (8 * _refOffsets.length) + _refOffsets[index];
 
-    await _file.setPosition(itemDataPos);
+    _position = itemDataPos;
     final key = await _readText();
     final binIndex = await _readInt();
     final itemIndex = await _readShort();
@@ -121,11 +125,11 @@ class SlobReader {
         (8 * _storeOffsets.length) +
         _storeOffsets[binIndex];
 
-    await _file.setPosition(itemDataPos);
+    _position = itemDataPos;
     final binItemCount = await _readInt();
-    await _file.read(binItemCount);
+    await _read(binItemCount);
     final compressedSize = await _readInt();
-    final compressedContent = await _file.read(compressedSize);
+    final compressedContent = await _read(compressedSize);
 
     final decompressed = _decompress(compressedContent);
 
@@ -197,11 +201,11 @@ class SlobReader {
           (8 * _storeOffsets.length) +
           _storeOffsets[binIndex];
 
-      await _file.setPosition(itemDataPos);
+      _position = itemDataPos;
       final binItemCount = await _readInt();
-      final contentTypeIds = await _file.read(binItemCount);
+      final contentTypeIds = await _read(binItemCount);
       final compressedSize = await _readInt();
-      final compressedContent = await _file.read(compressedSize);
+      final compressedContent = await _read(compressedSize);
 
       final decompressed = _decompress(compressedContent);
       final binReader = _BinReader(decompressed, binItemCount);
@@ -229,31 +233,37 @@ class SlobReader {
         4 +
         (8 * _storeOffsets.length) +
         _storeOffsets[binIndex];
-    await _file.setPosition(itemDataPos + 4); // skip itemCount
-    final contentTypeIds = await _file.read(itemIndex + 1);
+    _position = itemDataPos + 4; // skip itemCount
+    final contentTypeIds = await _read(itemIndex + 1);
     return contentTypeIds[itemIndex];
   }
 
   // Helpers
-  Future<int> _readByte() async => (await _file.read(1))[0];
+  Future<Uint8List> _read(int length) async {
+    final bytes = await _source.read(_position, length);
+    _position += bytes.length;
+    return bytes;
+  }
+
+  Future<int> _readByte() async => (await _read(1))[0];
   Future<int> _readShort() async {
-    final bytes = await _file.read(2);
+    final bytes = await _read(2);
     return ByteData.view(bytes.buffer).getUint16(0);
   }
 
   Future<int> _readInt() async {
-    final bytes = await _file.read(4);
+    final bytes = await _read(4);
     return ByteData.view(bytes.buffer).getUint32(0);
   }
 
   Future<int> _readLong() async {
-    final bytes = await _file.read(8);
+    final bytes = await _read(8);
     return ByteData.view(bytes.buffer).getUint64(0);
   }
 
   Future<String> _readTinyText({bool padded = false}) async {
     final len = await _readByte();
-    final bytes = await _file.read(padded ? 255 : len);
+    final bytes = await _read(padded ? 255 : len);
     var actualBytes = bytes;
     if (padded) {
       final nullIndex = bytes.indexOf(0);
@@ -266,7 +276,7 @@ class SlobReader {
 
   Future<String> _readText() async {
     final len = await _readShort();
-    final bytes = await _file.read(len);
+    final bytes = await _read(len);
     return String.fromCharCodes(bytes);
   }
 
@@ -281,7 +291,7 @@ class SlobReader {
   SlobHeader get header => _header;
 
   Future<void> close() async {
-    await _file.close();
+    await _source.close();
   }
 }
 

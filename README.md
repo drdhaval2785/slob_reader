@@ -55,12 +55,33 @@ void main() async {
 
 ### `SlobReader.open(String path)`
 
-Opens a `.slob` file for reading. Validates the magic bytes, parses the header, and loads both the ref-index and store-index into memory in a single bulk read.
-
-Throws an `Exception` if the file does not start with the correct Slob magic bytes.
+Opens a `.slob` file for reading. Validates the magic bytes, parses the header, and loads both the ref-index and store-index into memory. This is a convenience wrapper around `openSource` using `FileRandomAccessSource`.
 
 ```dart
 final reader = await SlobReader.open('en-wiktionary.slob');
+```
+
+---
+
+### `SlobReader.openSource(RandomAccessSource source)`
+
+Opens a `.slob` from an arbitrary source. This is useful for environments where `dart:io` `File` is not directly accessible, such as Android Storage Access Framework (SAF) `content://` URIs or Web Blobs.
+
+```dart
+class MyCustomSource implements RandomAccessSource {
+  @override
+  Future<Uint8List> read(int offset, int length) async {
+    // Implement your own reading logic here (e.g., platform channel call)
+  }
+  
+  @override
+  Future<int> get length async => 12345;
+  
+  @override
+  Future<void> close() async {}
+}
+
+final reader = await SlobReader.openSource(MyCustomSource());
 ```
 
 ---

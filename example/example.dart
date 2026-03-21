@@ -47,7 +47,35 @@ void main(List<String> args) async {
 
   // Always close when done.
   await reader.close();
-  print('\nFile closed. Bye!');
+  print('\nFile closed.');
+
+  // ─────────────────────────────────────────────────────────────
+  // 8. Open from a custom RandomAccessSource (e.g. for Android SAF)
+  // ─────────────────────────────────────────────────────────────
+  await _showCustomSource(path);
+
+  print('\nBye!');
+}
+
+// ───────────────────────────────────────────────────────────────
+// Section 8 — Custom Source
+// ───────────────────────────────────────────────────────────────
+Future<void> _showCustomSource(String path) async {
+  print('══════════════════════════════════');
+  print(' 8. Custom Source (RandomAccessSource)');
+  print('══════════════════════════════════');
+
+  // Here we use FileRandomAccessSource which implements RandomAccessSource.
+  // In a real Flutter app (hdict), you would use SafStreamSource.
+  final source = FileRandomAccessSource(path);
+  print('Opening via source: ${source.path}');
+  
+  final reader = await SlobReader.openSource(source);
+  print('Successfully opened source.');
+  print('Entry count: ${reader.header.blobCount}');
+
+  await reader.close();
+  print('Custom source closed.');
 }
 
 // ───────────────────────────────────────────────────────────────

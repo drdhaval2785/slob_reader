@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Added `RandomAccessSource` abstraction to allow reading from arbitrary byte sources (e.g., Android SAF `content://` URIs).
+- Added `FileRandomAccessSource` as the default implementation for `dart:io`.
+- Added `SlobReader.openSource` for direct source-based initialization.
+
 ## 0.1.4
 
 - Added documentation and examples.
