@@ -139,17 +139,124 @@ class SlobReader {
   }
 
   Uint8List _decompress(Uint8List compressedContent) {
-    if (_header.compression == 'zlib') {
-      return Uint8List.fromList(ZLibDecoder().decodeBytes(compressedContent));
-    } else if (_header.compression == 'bz2') {
-      return Uint8List.fromList(BZip2Decoder().decodeBytes(compressedContent));
-    } else if (_header.compression == 'lzma2') {
-      return Uint8List.fromList(XZDecoder().decodeBytes(compressedContent));
-    } else if (_header.compression == '') {
-      return compressedContent;
-    } else {
-      throw Exception('Unsupported compression: ${_header.compression}');
+    switch (_header.compression) {
+      case '':
+        return compressedContent;
+      case 'zlib':
+        return Uint8List.fromList(ZLibDecoder().decodeBytes(compressedContent));
+      case 'bz2':
+        return Uint8List.fromList(BZip2Decoder().decodeBytes(compressedContent));
+      case 'lzma2':
+        return _decompressLzma2(compressedContent);
+      default:
+        throw Exception('Unsupported compression: ${_header.compression}');
     }
+  }
+
+  /// Decompresses raw LZMA2 data stored in slob files.
+  ///
+  /// Slob uses Python's `lzma.compress(data, format=lzma.FORMAT_RAW,
+  /// filters=[{"id": lzma.FILTER_LZMA2}])`, which produces bare LZMA2 chunks
+  /// with NO XZ container. These bytes are exactly the inner block data of an
+  /// XZ stream. We wrap them in a minimal valid XZ container so that
+  /// [XZDecoder] can decode them.
+  ///
+  /// Key insight: [XZDecoder.decodeBytes] ignores the return value of
+  /// [XZDecoder.decodeStream]. Even if the index verification fails (we use a
+  /// 0-record dummy index to avoid needing the uncompressed size), the decoded
+  /// output is already written to the output buffer and is returned correctly.
+  Uint8List _decompressLzma2(Uint8List rawLzma2) {
+    final xzData = _buildXzContainer(rawLzma2);
+    return Uint8List.fromList(XZDecoder().decodeBytes(xzData));
+  }
+
+  /// Computes CRC32 (ISO 3309 polynomial, same as used by XZ format).
+  static int _crc32(List<int> data) {
+    var crc = 0xFFFFFFFF;
+    for (final b in data) {
+      crc ^= b;
+      for (var j = 0; j < 8; j++) {
+        crc = (crc & 1) != 0 ? (crc >>> 1) ^ 0xEDB88320 : crc >>> 1;
+      }
+    }
+    return (~crc) & 0xFFFFFFFF;
+  }
+
+  /// Writes [value] as a 32-bit little-endian integer into [buf] at [offset].
+  static void _writeUint32LE(Uint8List buf, int offset, int value) {
+    buf[offset]     =  value        & 0xFF;
+    buf[offset + 1] = (value >>  8) & 0xFF;
+    buf[offset + 2] = (value >> 16) & 0xFF;
+    buf[offset + 3] = (value >> 24) & 0xFF;
+  }
+
+  /// Wraps [rawLzma2] (bare LZMA2 chunks from slob) in a minimal valid XZ
+  /// stream container so that [XZDecoder] can decode the data.
+  ///
+  /// XZ container layout produced:
+  /// ```
+  /// [Stream Header 12 B]  magic + flags(00 00) + CRC32
+  /// [Block Header  12 B]  size + flags + LZMA2 filter(0x21) + props + CRC32
+  /// [Raw LZMA2    N  B]  the bytes directly from the slob bin
+  /// [Padding       P  B]  0–3 zero bytes → (12+N+P) % 4 == 0
+  /// [Index stub    2  B]  0x00 (indicator) + 0x00 (0 records VLI)
+  ///                        nRecords=0 ≠ actual block count=1 → decode()=false
+  ///                        decodeBytes() ignores that → decoded output returned
+  /// ```
+  ///
+  /// Notes:
+  /// - dict_prop = 0x16 (8 MB) matches Python lzma's default preset 6.
+  ///   The `dictionarySize` parameter is not actually used by the archive
+  ///   package's `_readLZMA2` during decoding, so this value is a safe default
+  ///   for all slob files regardless of their original compression settings.
+  /// - stream_flags CRC32 = 0x41D912FF (precomputed, CRC32 of {0x00,0x00}).
+  /// - block header CRC is computed at runtime (depends on dict_prop).
+  static Uint8List _buildXzContainer(Uint8List rawLzma2) {
+    const dictProp = 0x16; // 8 MB, Python lzma default (preset 6)
+
+    // CRC32([0x00, 0x00]) — stream flags bytes. Precomputed constant.
+    const streamFlagsCrc = 0x41D912FF;
+
+    // Build 8-byte block header prefix (excludes the 4-byte CRC field).
+    final blockHdr = Uint8List(8);
+    blockHdr[0] = 0x02; // size byte → total block header = (2+1)*4 = 12 bytes
+    blockHdr[1] = 0x00; // flags: 1 filter, no optional compressed/uncompressed lengths
+    blockHdr[2] = 0x21; // LZMA2 filter ID
+    blockHdr[3] = 0x01; // filter properties length = 1 byte
+    blockHdr[4] = dictProp;
+    // blockHdr[5..7] = 0x00 padding (already zero)
+    final blockHdrCrc = _crc32(blockHdr);
+
+    // Zero-padding to make (block_header + raw_data) a multiple of 4 bytes.
+    final padLen = (4 - (12 + rawLzma2.length) % 4) % 4;
+
+    // Allocate output: stream_hdr(12) + block_hdr(12) + data(N) + pad(P) + stub(2)
+    final out = Uint8List(24 + rawLzma2.length + padLen + 2);
+    var p = 0;
+
+    // ── Stream header (12 bytes) ──────────────────────────────────────────────
+    out[p++] = 0xFD; out[p++] = 0x37; out[p++] = 0x7A;
+    out[p++] = 0x58; out[p++] = 0x5A; out[p++] = 0x00; // XZ magic
+    out[p++] = 0x00; out[p++] = 0x00;                   // stream flags (check=none)
+    _writeUint32LE(out, p, streamFlagsCrc); p += 4;
+
+    // ── Block header (12 bytes) ───────────────────────────────────────────────
+    out.setRange(p, p + 8, blockHdr); p += 8;
+    _writeUint32LE(out, p, blockHdrCrc); p += 4;
+
+    // ── Raw LZMA2 data ───────────────────────────────────────────────────────
+    out.setRange(p, p + rawLzma2.length, rawLzma2);
+    p += rawLzma2.length;
+
+    // ── Block padding (already zero-filled by Uint8List) ────────────────────
+    p += padLen;
+
+    // ── Dummy index stub ─────────────────────────────────────────────────────
+    out[p++] = 0x00; // index indicator byte (signals start of index section)
+    out[p++] = 0x00; // nRecords VLI = 0 → mismatch with 1 block → decode()=false
+    //                  XZDecoder.decodeBytes() ignores that return value. ✓
+
+    return out;
   }
 
   Future<SlobBlob> getBlob(int index) async {
