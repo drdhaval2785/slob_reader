@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:archive/archive_io.dart';
@@ -378,13 +379,13 @@ class SlobReader {
     } else {
       actualBytes = bytes.sublist(0, len);
     }
-    return String.fromCharCodes(actualBytes);
+    return utf8.decode(actualBytes, allowMalformed: true);
   }
 
   Future<String> _readText() async {
     final len = await _readShort();
     final bytes = await _read(len);
-    return String.fromCharCodes(bytes);
+    return utf8.decode(bytes, allowMalformed: true);
   }
 
   bool _listEquals(List<int> a, List<int> b) {
