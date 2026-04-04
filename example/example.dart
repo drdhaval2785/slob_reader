@@ -1,5 +1,4 @@
 // ignore_for_file: avoid_print
-import 'dart:io';
 import 'package:slob_reader/slob_reader.dart';
 
 /// Run with:

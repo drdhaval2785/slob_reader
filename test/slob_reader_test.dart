@@ -12,7 +12,6 @@ const _expectedBlobCount = 8802;
 const _expectedTagLabel = 'English-French FreeDict Dictionary';
 const _expectedTagEdition = '0.1.6';
 // Content types: [0]=text/css, [1]=application/javascript, [2]=text/html;charset=utf-8
-const _expectedCssType = 'text/css';
 const _expectedHtmlType = 'text/html;charset=utf-8';
 // First entry is the CSS asset
 const _firstBlobKey = '~/css/default.css';
@@ -258,12 +257,12 @@ void main() {
       expect(blob.id, greaterThanOrEqualTo(0));
     });
 
-    test('blob id encodes binIndex and itemIndex', () async {
+    test('blob id matches its global index', () async {
       if (!_slobPresent()) return markTestSkipped('abc.slob not found');
-      final ref = await reader.getRef(0);
-      final blob = await reader.getBlob(0);
-      final expectedId = (ref.binIndex << 16) | ref.itemIndex;
-      expect(blob.id, equals(expectedId));
+      // Use an index other than zero to be definitive.
+      const index = 5;
+      final blob = await reader.getBlob(index);
+      expect(blob.id, equals(index));
     });
 
     test('fragment field is a String (may be empty)', () async {

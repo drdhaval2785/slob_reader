@@ -19,6 +19,9 @@ class MemoryRandomAccessSource implements RandomAccessSource {
   Future<int> get length async => _data.length;
 
   @override
+  Future<void> open() async {}
+
+  @override
   Future<void> close() async {}
 }
 

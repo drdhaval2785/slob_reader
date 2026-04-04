@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Added support for `lzma2` compressed slob files.
+
 ## 0.1.5
 
 - Added `RandomAccessSource` abstraction to allow reading from arbitrary byte sources (e.g., Android SAF `content://` URIs).
